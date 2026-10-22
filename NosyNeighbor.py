@@ -1,3 +1,5 @@
+from ast import main
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -5,7 +7,9 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.actions import interaction
 from selenium.webdriver.edge.options import Options
-import sys
+import os
+import re
+from datetime import date, timedelta
 from gcsa.google_calendar import GoogleCalendar
 from gcsa.event import Event
 
@@ -19,44 +23,60 @@ def create_driver():
     driver = webdriver.Edge(options=options)
     return driver
 
-def __main__():
-    driver = create_driver()
-    driver.get("https://www.visitspacecoast.com/events/")
-    wait = WebDriverWait(driver, 10)
-    wait.until(lambda d: d.find_element(By.CLASS_NAME, "paging"))
+def next_month(y, m):
+    return (y + 1, 1) if (m == 12) else (y, m + 1)
 
-    #find no. of pages we'll need to click thru:
-   
-    pages = driver.find_elements(By.CLASS_NAME, "js-pagination-link")
-    last_page = pages[-1].text
+def parse_range(text, year=None):
+        #make sure my dates are datey enough and handle the multimonth span cases:
+    MONTHS = {m: i for i, m in enumerate(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], 1)}
+    PAT= re.compile(r'([a-z]{3})\w*\.?\s+(\d{1,2})(?:st|nd|rd|th)?'                       # "sep 8th"
+    r'(?:\s*-\s*(?:([a-z]{3})\w*\.?\s+)?(\d{1,2})(?:st|nd|rd|th)?)?'      # "-31st" or "-oct 2nd"
+    r'(?:\s*,?\s*(\d{4}))?', re.IGNORECASE)                                 # ", 2023"
+    year = year or date.today().year
+    m = PAT.search(text.lower())
+    if not m:
+        raise ValueError(f"Can't parse date: {text!r}")
+    sm, sd = MONTHS[m.group(1)], int(m.group(2))
+    start = date(year, sm, sd)
 
-    #grab events from all pages
-    #first page:
-    event_parents = driver.find_elements(By.CLASS_NAME, "cards")
-    titles = driver.find_elements(By.CLASS_NAME, "card-title")
-    titlenames = [title.text for title in titles]
-    dates = driver.find_elements(By.CLASS_NAME, "card-date")
-    date = [date.text for date in dates]
-    descriptions = driver.find_elements(By.CLASS_NAME, "card-description")
-    description = [description.text for description in descriptions]
+    if m.group(4) is None:                      # single day, no range
+        return start, start
 
-    linklist = []
-    
-    for element in event_parents:
-        links = element.find_elements(By.XPATH, ".//a")
-        linklist.append(links[1].get_attribute("href"))
+    ed = int(m.group(4))
+    if m.group(3):                              # explicit end month
+        return start, date(year, MONTHS[m.group(3)], ed)
 
-    calevents = [list(group) for group in zip(titlenames, date, description, linklist)]
+    y, em = year, sm                            # no end month: try this month, then next
+    for _ in range(2):
+        try:
+            end = date(y, em, ed)
+            if end >= start:
+                return start, end
+        except ValueError:
+            pass
+        y, em = next_month(y, em)
+    raise ValueError(f"Bad range: {text!r}")
 
-    #go through the rest of the pages and grab events the same way
-    for page in range(2, int(last_page) + 1):
-        driver.execute_script(f"window.location.href = 'https://www.visitspacecoast.com/events/?app_page={page}/';")
+def main():
+    try:
+        driver = create_driver()
+        driver.get("https://www.visitspacecoast.com/events/")
+        wait = WebDriverWait(driver, 10)
         wait.until(lambda d: d.find_element(By.CLASS_NAME, "paging"))
+
+        #find no. of pages we'll need to click thru:
+    
+        pages = driver.find_elements(By.CLASS_NAME, "js-pagination-link")
+        last_page = pages[-1].text
+
+
+        #grab events from all pages
+        #first page:
         event_parents = driver.find_elements(By.CLASS_NAME, "cards")
         titles = driver.find_elements(By.CLASS_NAME, "card-title")
         titlenames = [title.text for title in titles]
         dates = driver.find_elements(By.CLASS_NAME, "card-date")
-        date = [date.text for date in dates]
+        datelist = [date.text for date in dates]
         descriptions = driver.find_elements(By.CLASS_NAME, "card-description")
         description = [description.text for description in descriptions]
 
@@ -66,21 +86,54 @@ def __main__():
             links = element.find_elements(By.XPATH, ".//a")
             linklist.append(links[1].get_attribute("href"))
 
-        page_events = [list(group) for group in zip(titlenames, date, description, linklist)]
-        calevents.extend(page_events)
+        calevents = [list(group) for group in zip(titlenames, datelist, description, linklist)]
 
-    # Perform login if necessary
-    # add events to calendar if they do not already exist
+        #go through the rest of the pages and grab events the same way
+        for page in range(2, int(last_page) + 1):
+            driver.execute_script(f"window.location.href = 'https://www.visitspacecoast.com/events/?app_page={page}/';")
+            wait.until(lambda d: d.find_element(By.CLASS_NAME, "paging"))
+            event_parents = driver.find_elements(By.CLASS_NAME, "cards")
+            titles = driver.find_elements(By.CLASS_NAME, "card-title")
+            titlenames = [title.text for title in titles]
+            dates = driver.find_elements(By.CLASS_NAME, "card-date")
+            datelist = [date.text for date in dates]
+            descriptions = driver.find_elements(By.CLASS_NAME, "card-description")
+            description = [description.text for description in descriptions]
 
-    # Create a new event
-    event_title = "Test Event"
-    event_start_time = "2024-06-01T10:00:00"
-    event_end_time = "2024-06-01T11:00:00"
+            linklist = []
+            
+            for element in event_parents:
+                links = element.find_elements(By.XPATH, ".//a")
+                linklist.append(links[1].get_attribute("href"))
+
+            page_events = [list(group) for group in zip(titlenames, datelist, description, linklist)]
+            calevents.extend(page_events)
+        
+        # Perform login if necessary
+        # add events to calendar if they do not already exist
+        CALENDAR_ID = os.environ["CALENDAR_ID"]
+        BASE = os.path.dirname(os.path.abspath(__file__))
+        calendar = GoogleCalendar(CALENDAR_ID, credentials_path=os.path.join(BASE, 'credentials.json'),
+        token_path=os.path.join(BASE, 'token.pickle'),)
+        # grab list of currently existing events
+        earliest = min(p[1] for p in parsed)
+        latest = max(p[2] for p in parsed)
+        existing = {(e.summary, e.start) for e in calendar.get_events(time_min=earliest, time_max=latest)}
     
-    calendar = GoogleCalendar()
-    event = Event(event_title, start=event_start_time, end=event_end_time)
-    calendar.add_event(event)
+        #parse dates and add events to calendar if they do not already exist
+        parsed = []
+        for title, datelist, description, linklist in calevents:
+            # Parse the date range
+            start, end = parse_range(datelist)
+            parsed.append((title, start, end, f"{description}\n\n{linklist}"))
 
-    print(f"Event '{event_title}' created from {event_start_time} to {event_end_time}.")
-    
-    driver.quit()
+        for title, start, end, desc in parsed:
+            if (title, start) not in existing:
+                continue
+            calendar.add_event = (Event(title=title, start=start, end=end, description=desc))
+        
+    finally: 
+        driver.quit()
+
+if __name__ == "__main__":
+    main()
