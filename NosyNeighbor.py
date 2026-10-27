@@ -109,27 +109,25 @@ def main():
     CALENDAR_ID = os.environ["CALENDAR_ID"]
     BASE = os.path.dirname(os.path.abspath(__file__))
     calendar = GoogleCalendar(CALENDAR_ID, credentials_path=os.path.join(BASE, 'credentials.json'),
-            token_path=os.path.join(BASE, 'token.pickle'),)
-            # grab list of currently existing events
-            #parse dates and add events to calendar if they do not already exist
-            parsed = []
-            for title, datelist, description, linklist in calevents:
-                # Parse the date range
-                start, end = parse_range(datelist)
-                if end <start:
-                    end.year += 1
-                parsed.append((title, start, end+timedelta(days=1), f"{description}\n\n{linklist}"))
-                if not parsed:
-                    return
+    token_path=os.path.join(BASE, 'token.pickle'),)
+    # grab list of currently existing events
+    #parse dates and add events to calendar if they do not already exist
+    parsed = []
+    for title, datelist, description, linklist in calevents:
+    # Parse the date range
+        start, end = parse_range(datelist)
+        parsed.append((title, start, end+timedelta(days=1), f"{description}\n\n{linklist}"))
+        if not parsed:
+            return
     
-            earliest = min(p[1] for p in parsed)
-            latest = max(p[2] for p in parsed)
-            existing = {(e.summary, e.start) for e in calendar.get_events(time_min=earliest, time_max=latest)}
+        earliest = min(p[1] for p in parsed)
+        latest = max(p[2] for p in parsed)
+        existing = {(e.summary, e.start) for e in calendar.get_events(time_min=earliest, time_max=latest)}
     
-            for title, start, end, desc in parsed:
-                if (title, start) in existing:
-                    continue
-                calendar.add_event(Event(title, start=start, end=end, description=desc))
+        for title, start, end, desc in parsed:
+            if (title, start) in existing:
+                continue
+            calendar.add_event(Event(title, start=start, end=end, description=desc))
             
     
 
