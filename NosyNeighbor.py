@@ -7,6 +7,8 @@ import re
 from datetime import date,timedelta
 from gcsa.google_calendar import GoogleCalendar
 from gcsa.event import Event
+from google.oauth2 import service_account
+
 
 ##webdriver options & setup
 def create_driver():
@@ -15,7 +17,7 @@ def create_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--start-maximized")
-    driver = webdriver.Edge(options=options)
+    driver = webdriver.Firefox(options=options)
     return driver
 
 def next_month(y, m):
@@ -54,6 +56,8 @@ def parse_range(text, year=None):
 
 def main():
     driver = create_driver()
+    SCOPES = ['https://www.googleapis.com/auth/calendar']
+    creds = service_account.Credentials.from_service_account_file(os.path.join(BASE, 'service_account.json'), scopes=SCOPES)
     try:
         driver.get("https://www.visitspacecoast.com/events/")
         wait = WebDriverWait(driver, 10)
@@ -108,8 +112,8 @@ def main():
     # add events to calendar if they do not already exist
     CALENDAR_ID = os.environ["CALENDAR_ID"]
     BASE = os.path.dirname(os.path.abspath(__file__))
-    calendar = GoogleCalendar(CALENDAR_ID, credentials_path=os.path.join(BASE, 'credentials.json'),
-    token_path=os.path.join(BASE, 'token.pickle'),)
+    calendar = GoogleCalendar(CALENDAR_ID, credentials=creds)
+   # token_path=os.path.join(BASE, 'token.pickle'),)
     # grab list of currently existing events
     #parse dates and add events to calendar if they do not already exist
     parsed = []
