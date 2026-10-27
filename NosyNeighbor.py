@@ -1,15 +1,10 @@
-from ast import main
-
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.actions import interaction
 from selenium.webdriver.edge.options import Options
 import os
 import re
-from datetime import date, timedelta
+from datetime import date,timedelta
 from gcsa.google_calendar import GoogleCalendar
 from gcsa.event import Event
 
@@ -33,10 +28,10 @@ def parse_range(text, year=None):
     r'(?:\s*-\s*(?:([a-z]{3})\w*\.?\s+)?(\d{1,2})(?:st|nd|rd|th)?)?'      # "-31st" or "-oct 2nd"
     r'(?:\s*,?\s*(\d{4}))?', re.IGNORECASE)                                 # ", 2023"
     year = year or date.today().year
-    m = PAT.search(text.lower())
+    m = PAT.search(text)
     if not m:
         raise ValueError(f"Can't parse date: {text!r}")
-    sm, sd = MONTHS[m.group(1)], int(m.group(2))
+    sm, sd = MONTHS[m.group(1).capitalize()], int(m.group(2))
     start = date(year, sm, sd)
 
     if m.group(4) is None:                      # single day, no range
@@ -44,7 +39,7 @@ def parse_range(text, year=None):
 
     ed = int(m.group(4))
     if m.group(3):                              # explicit end month
-        return start, date(year, MONTHS[m.group(3)], ed)
+        return start, date(year, MONTHS[m.group(3)].capitalize(), ed)
 
     y, em = year, sm                            # no end month: try this month, then next
     for _ in range(2):
@@ -58,8 +53,8 @@ def parse_range(text, year=None):
     raise ValueError(f"Bad range: {text!r}")
 
 def main():
+    driver = create_driver()
     try:
-        driver = create_driver()
         driver.get("https://www.visitspacecoast.com/events/")
         wait = WebDriverWait(driver, 10)
         wait.until(lambda d: d.find_element(By.CLASS_NAME, "paging"))
@@ -108,32 +103,35 @@ def main():
 
             page_events = [list(group) for group in zip(titlenames, datelist, description, linklist)]
             calevents.extend(page_events)
-        
-        # Perform login if necessary
-        # add events to calendar if they do not already exist
-        CALENDAR_ID = os.environ["CALENDAR_ID"]
-        BASE = os.path.dirname(os.path.abspath(__file__))
-        calendar = GoogleCalendar(CALENDAR_ID, credentials_path=os.path.join(BASE, 'credentials.json'),
-        token_path=os.path.join(BASE, 'token.pickle'),)
-        # grab list of currently existing events
-        earliest = min(p[1] for p in parsed)
-        latest = max(p[2] for p in parsed)
-        existing = {(e.summary, e.start) for e in calendar.get_events(time_min=earliest, time_max=latest)}
-    
-        #parse dates and add events to calendar if they do not already exist
-        parsed = []
-        for title, datelist, description, linklist in calevents:
-            # Parse the date range
-            start, end = parse_range(datelist)
-            parsed.append((title, start, end, f"{description}\n\n{linklist}"))
-
-        for title, start, end, desc in parsed:
-            if (title, start) not in existing:
-                continue
-            calendar.add_event = (Event(title=title, start=start, end=end, description=desc))
-        
     finally: 
         driver.quit()
+    # add events to calendar if they do not already exist
+    CALENDAR_ID = os.environ["CALENDAR_ID"]
+    BASE = os.path.dirname(os.path.abspath(__file__))
+    calendar = GoogleCalendar(CALENDAR_ID, credentials_path=os.path.join(BASE, 'credentials.json'),
+            token_path=os.path.join(BASE, 'token.pickle'),)
+            # grab list of currently existing events
+            #parse dates and add events to calendar if they do not already exist
+            parsed = []
+            for title, datelist, description, linklist in calevents:
+                # Parse the date range
+                start, end = parse_range(datelist)
+                if end <start:
+                    end.year += 1
+                parsed.append((title, start, end+timedelta(days=1), f"{description}\n\n{linklist}"))
+                if not parsed:
+                    return
+    
+            earliest = min(p[1] for p in parsed)
+            latest = max(p[2] for p in parsed)
+            existing = {(e.summary, e.start) for e in calendar.get_events(time_min=earliest, time_max=latest)}
+    
+            for title, start, end, desc in parsed:
+                if (title, start) in existing:
+                    continue
+                calendar.add_event(Event(title, start=start, end=end, description=desc))
+            
+    
 
 if __name__ == "__main__":
     main()
